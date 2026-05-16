@@ -3,6 +3,7 @@ import {
     TextChannel as FluxerTextChannel,
     Webhook as FluxerWebhook,
     MessageAttachmentFlags,
+    Routes as FluxerRoutes,
 } from '@fluxerjs/core';
 import {
     AttachmentBuilder,
@@ -270,26 +271,27 @@ export class WebhookService {
         data: WebhookMessageData
     ): Promise<void> {
         try {
-            const msg = await webhook.editMessage(messageId, {
-                content: data.content,
-                attachments:
-                    data.attachments?.map((attachment, index) => ({
-                        id: index,
-                        name: attachment.name,
-                        filename: attachment.name,
-                        flags: attachment.spoiler
-                            ? MessageAttachmentFlags.IS_SPOILER
-                            : undefined,
-                    })) || [],
-                embeds:
-                    data.embeds?.map((embed) => embed.toFluxerEmbed()) || [],
+            const route =
+                FluxerRoutes.webhookExecute(webhook.id, webhook.token!) +
+                `/messages/${messageId}`;
+            await webhook.client.rest.patch(route, {
+                body: {
+                    content: data.content,
+                    attachments:
+                        data.attachments?.map((attachment, index) => ({
+                            id: index,
+                            name: attachment.name,
+                            filename: attachment.name,
+                            flags: attachment.spoiler
+                                ? MessageAttachmentFlags.IS_SPOILER
+                                : undefined,
+                        })) || [],
+                    embeds:
+                        data.embeds?.map((embed) => embed.toFluxerEmbed()) ||
+                        [],
+                },
+                auth: false,
             });
-
-            if (!msg) {
-                throw new Error(
-                    'Did not receive message object after editing via Fluxer webhook'
-                );
-            }
         } catch (error: unknown) {
             logger.error('Error editing message via Fluxer webhook:', error);
             throw error;

@@ -12,7 +12,7 @@ import { matchChannels, ChannelInfo } from '../../../utils/channelMatcher';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
-import { EmbedColors } from '../../../utils/embeds';
+import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 
 export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
@@ -149,27 +149,26 @@ export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
                 fluxerTextChannels.length - proposals.length;
             const unmatchedTotal = unmatchedDiscord + unmatchedFluxer;
 
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle('Auto-link Wizard')
-                        .setDescription(
-                            [
-                                `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} found`,
-                                '',
-                                lines.join('\n'),
-                                '',
-                                unmatchedTotal > 0
-                                    ? `${unmatchedTotal} channel${unmatchedTotal !== 1 ? 's' : ''} had no confident match.`
-                                    : 'All unlinked channels were matched.',
-                                `Run \`${COMMAND_PREFIX}autolink confirm\` to link all proposals.`,
-                            ].join('\n')
-                        )
-                        .setColor(EmbedColors.Warning)
-                        .setFooter(footer)
-                        .setTimestamp(),
-                ],
+            const headerLine = `${proposals.length} proposal${proposals.length !== 1 ? 's' : ''} found`;
+            const footerLines = [
+                unmatchedTotal > 0
+                    ? `${unmatchedTotal} channel${unmatchedTotal !== 1 ? 's' : ''} had no confident match.`
+                    : 'All unlinked channels were matched.',
+                `Run \`${COMMAND_PREFIX}autolink confirm\` to link all proposals.`,
+            ];
+            const chunks = chunkDescriptionLines(lines, '\n');
+            const embeds = chunks.map((chunk, i) => {
+                const parts: string[] = [];
+                if (i === 0) parts.push(headerLine, '');
+                parts.push(...chunk);
+                if (i === chunks.length - 1) parts.push('', ...footerLines);
+                return new EmbedBuilder()
+                    .setTitle(i === 0 ? 'Auto-link Wizard' : null)
+                    .setDescription(parts.join('\n'))
+                    .setColor(EmbedColors.Warning);
             });
+            embeds[embeds.length - 1].setFooter(footer).setTimestamp();
+            await message.reply({ embeds });
             return;
         }
 
@@ -210,26 +209,28 @@ export default class AutolinkFluxerCommandHandler extends FluxerCommandHandler {
             }
         }
 
-        const descriptionLines = [
-            `Successfully linked **${successCount}** of **${proposals.length}** proposed channel pair${proposals.length !== 1 ? 's' : ''}.`,
-        ];
-        if (errors.length > 0) {
-            descriptionLines.push('', 'Failures:');
-            errors.forEach((e) => descriptionLines.push(`> ${e}`));
-        }
+        const summaryLine = `Successfully linked **${successCount}** of **${proposals.length}** proposed channel pair${proposals.length !== 1 ? 's' : ''}.`;
 
-        await message.reply({
-            embeds: [
+        let embeds: EmbedBuilder[];
+        if (errors.length === 0) {
+            embeds = [
                 new EmbedBuilder()
-                    .setDescription(descriptionLines.join('\n'))
-                    .setColor(
-                        errors.length > 0
-                            ? EmbedColors.Warning
-                            : EmbedColors.Success
-                    )
-                    .setFooter(footer)
-                    .setTimestamp(),
-            ],
-        });
+                    .setDescription(summaryLine)
+                    .setColor(EmbedColors.Success),
+            ];
+        } else {
+            const errorLines = errors.map((e) => `> ${e}`);
+            const chunks = chunkDescriptionLines(errorLines, '\n');
+            embeds = chunks.map((chunk, i) => {
+                const parts: string[] = [];
+                if (i === 0) parts.push(summaryLine, '', 'Failures:');
+                parts.push(...chunk);
+                return new EmbedBuilder()
+                    .setDescription(parts.join('\n'))
+                    .setColor(EmbedColors.Warning);
+            });
+        }
+        embeds[embeds.length - 1].setFooter(footer).setTimestamp();
+        await message.reply({ embeds });
     }
 }

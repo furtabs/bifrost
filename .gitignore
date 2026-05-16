@@ -7,6 +7,8 @@ logs/
 docs/.vitepress/dist
 docs/.vitepress/cache
 .claude/
+.vs/
+.github/workflows/docker-release.yml
 personal.yml
 .github/workflows/docker-publish.yml
 personal2.yml
