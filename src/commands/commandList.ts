@@ -78,14 +78,12 @@ const commandList: Command[] = [
     {
         name: 'list',
         discord: {
-            description:
-                'Lists all channel links in this server. Use `all` (bot owner only) to list every bridge across all servers.',
-            usageArgs: ['[all]'],
+            description: 'Lists all channel links in this server.',
+            usageArgs: [],
         },
         fluxer: {
-            description:
-                'Lists all channel links in this server. Use `all` (bot owner only) to list every bridge across all servers.',
-            usageArgs: ['[all]'],
+            description: 'Lists all channel links in this server.',
+            usageArgs: [],
         },
     },
     {

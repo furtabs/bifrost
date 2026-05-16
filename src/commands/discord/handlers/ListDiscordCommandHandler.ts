@@ -5,7 +5,7 @@ import DiscordCommandHandler, {
 } from '../DiscordCommandHandler';
 import FluxerEntityResolver from '../../../services/entityResolver/FluxerEntityResolver';
 import logger from '../../../utils/logging/logger';
-import { EmbedColors } from '../../../utils/embeds';
+import { chunkDescriptionLines, EmbedColors } from '../../../utils/embeds';
 import { DISCORD_OWNER_ID } from '../../../utils/env';
 
 export default class ListDiscordCommandHandler extends DiscordCommandHandler {
@@ -51,6 +51,9 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
 
         if (args[0]?.toLowerCase() === 'all') {
             if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
+                logger.warn(
+                    `[list all] Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                );
                 await message.reply({
                     embeds: [
                         new EmbedBuilder()
@@ -105,24 +108,29 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                         guildLink.discordGuildId;
                     const title = `Discord: ${discordGuildName} (${guildLink.discordGuildId}) | Fluxer: ${fluxerGuildName} (${guildLink.fluxerGuildId})`;
 
-                    let description: string;
                     if (channelLinks.length === 0) {
-                        description = '*(no channel links)*';
+                        embeds.push(
+                            new EmbedBuilder()
+                                .setTitle(title)
+                                .setDescription('*(no channel links)*')
+                                .setColor(EmbedColors.Info)
+                        );
                     } else {
                         const lines = await this.buildChannelLines(
                             channelLinks,
                             guildLink.fluxerGuildId,
                             true
                         );
-                        description = lines.join('\n\n');
+                        const chunks = chunkDescriptionLines(lines);
+                        chunks.forEach((chunk, i) => {
+                            embeds.push(
+                                new EmbedBuilder()
+                                    .setTitle(i === 0 ? title : null)
+                                    .setDescription(chunk.join('\n\n'))
+                                    .setColor(EmbedColors.Info)
+                            );
+                        });
                     }
-
-                    embeds.push(
-                        new EmbedBuilder()
-                            .setTitle(title)
-                            .setDescription(description)
-                            .setColor(EmbedColors.Info)
-                    );
                 }
 
                 embeds[embeds.length - 1].setFooter(footer).setTimestamp();
@@ -166,6 +174,128 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 logger.error('Error listing all links:', err);
             }
             return;
+        }
+
+        if (args[0] && /^\d{17,20}$/.test(args[0])) {
+            const serverId = args[0];
+            if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
+                logger.warn(
+                    `[list] Non-owner attempted server ID lookup: user=${message.author.username} (${message.author.id}), serverId=${serverId}, guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                );
+                // Fall through to normal list behaviour
+            } else {
+                try {
+                    let guildLink =
+                        await this.linkService.getGuildLinkForDiscordGuild(
+                            serverId
+                        );
+                    if (!guildLink) {
+                        guildLink =
+                            await this.linkService.getGuildLinkForFluxerGuild(
+                                serverId
+                            );
+                    }
+
+                    if (!guildLink) {
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setDescription(
+                                        `No guild bridge found for server ID \`${serverId}\`.`
+                                    )
+                                    .setColor(EmbedColors.Warning)
+                                    .setFooter(footer)
+                                    .setTimestamp(),
+                            ],
+                        });
+                        return;
+                    }
+
+                    const [channelLinks, fluxerGuild, discordGuild] =
+                        await Promise.all([
+                            this.linkService.getChannelLinksForDiscordGuild(
+                                guildLink.discordGuildId
+                            ),
+                            this.fluxerEntityResolver
+                                .fetchGuild(guildLink.fluxerGuildId)
+                                .catch(() => null),
+                            this.getClient()
+                                .guilds.fetch(guildLink.discordGuildId)
+                                .catch(() => null),
+                        ]);
+
+                    const fluxerGuildName =
+                        (fluxerGuild as { name?: string } | null)?.name ??
+                        guildLink.fluxerGuildId;
+                    const discordGuildName =
+                        (discordGuild as { name?: string } | null)?.name ??
+                        guildLink.discordGuildId;
+                    const title = `Discord: ${discordGuildName} (${guildLink.discordGuildId}) | Fluxer: ${fluxerGuildName} (${guildLink.fluxerGuildId})`;
+
+                    if (channelLinks.length === 0) {
+                        await message.reply({
+                            embeds: [
+                                new EmbedBuilder()
+                                    .setTitle(title)
+                                    .setDescription('*(no channel links)*')
+                                    .setColor(EmbedColors.Info)
+                                    .setFooter(footer)
+                                    .setTimestamp(),
+                            ],
+                        });
+                        return;
+                    }
+
+                    const lines = await this.buildChannelLines(
+                        channelLinks,
+                        guildLink.fluxerGuildId,
+                        true
+                    );
+                    const chunks = chunkDescriptionLines(lines);
+                    const embeds = chunks.map((chunk, i) =>
+                        new EmbedBuilder()
+                            .setTitle(i === 0 ? title : null)
+                            .setDescription(chunk.join('\n\n'))
+                            .setColor(EmbedColors.Info)
+                    );
+                    embeds[embeds.length - 1].setFooter(footer).setTimestamp();
+
+                    if (!message.inGuild()) {
+                        await message.reply({ embeds });
+                    } else {
+                        try {
+                            const dm = await message.author.createDM();
+                            await dm.send({ embeds });
+                        } catch {
+                            await message.reply({
+                                embeds: [
+                                    new EmbedBuilder()
+                                        .setDescription(
+                                            'Could not send DM — ensure your DMs are open.'
+                                        )
+                                        .setColor(EmbedColors.Error)
+                                        .setFooter(footer)
+                                        .setTimestamp(),
+                                ],
+                            });
+                        }
+                    }
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to list links for server \`${serverId}\`: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Error listing links by server ID:', err);
+                }
+                return;
+            }
         }
 
         if (!message.inGuild()) {
@@ -237,17 +367,18 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 channelLinks,
                 guildLink.fluxerGuildId
             );
+            const chunks = chunkDescriptionLines(lines);
+            const embeds = chunks.map((chunk, i) =>
+                new EmbedBuilder()
+                    .setTitle(
+                        i === 0 ? 'Discord ↔ Fluxer | Linked Channels' : null
+                    )
+                    .setDescription(chunk.join('\n\n'))
+                    .setColor(EmbedColors.Info)
+            );
+            embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
-            await message.reply({
-                embeds: [
-                    new EmbedBuilder()
-                        .setTitle('Discord ↔ Fluxer | Linked Channels')
-                        .setDescription(lines.join('\n\n'))
-                        .setColor(EmbedColors.Info)
-                        .setFooter(footer)
-                        .setTimestamp(),
-                ],
-            });
+            await message.reply({ embeds });
         } catch (err: unknown) {
             await message.reply({
                 embeds: [
