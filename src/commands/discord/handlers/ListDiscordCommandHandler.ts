@@ -51,6 +51,9 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
 
         if (args[0]?.toLowerCase() === 'all') {
             if (!DISCORD_OWNER_ID || message.author.id !== DISCORD_OWNER_ID) {
+                logger.warn(
+                    `[list all] Non-owner attempted list all: user=${message.author.username} (${message.author.id}), guildId=${message.guildId ?? 'DM'}, channelId=${message.channelId}, content="${message.content}"`
+                );
                 await message.reply({
                     embeds: [
                         new EmbedBuilder()
