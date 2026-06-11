@@ -8,6 +8,7 @@ services:
         APP_VERSION: 1.2.3
     container_name: bifrost
     restart: unless-stopped
+    network_mode: host
     env_file:
       - .env
     volumes:
