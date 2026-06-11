@@ -8,6 +8,7 @@ import {
     createAudioPlayer,
     createAudioResource,
     entersState,
+    generateDependencyReport,
     getVoiceConnection,
     joinVoiceChannel,
 } from '@discordjs/voice';
@@ -196,6 +197,7 @@ export default class VoiceBridgeService {
         let logStateChange:
             | ((oldState: { status: string }, newState: { status: string }) => void)
             | null = null;
+        let udpHandshakeFailed = false;
 
         try {
             const discordGuild = await this.discordClient.guilds.fetch(
@@ -234,6 +236,12 @@ export default class VoiceBridgeService {
             }
 
             logStateChange = (oldState, newState) => {
+                if (
+                    oldState.status === VoiceConnectionStatus.Connecting &&
+                    newState.status === VoiceConnectionStatus.Signalling
+                ) {
+                    udpHandshakeFailed = true;
+                }
                 logger.info(
                     `Voice bridge Discord connection (${voiceLink.discordChannelId}): ${oldState.status} → ${newState.status}`
                 );
@@ -345,6 +353,15 @@ export default class VoiceBridgeService {
                 `Failed to start voice bridge (Discord ${voiceLink.discordChannelId} ↔ Fluxer ${voiceLink.fluxerChannelId}, connection status: ${status}):`,
                 err
             );
+            if (udpHandshakeFailed || status === VoiceConnectionStatus.Signalling) {
+                logger.error(
+                    'Discord voice UDP handshake failed (connecting → signalling loop). ' +
+                        'Discord voice requires outbound UDP to Discord voice servers. ' +
+                        'In Docker on Linux, set network_mode: host in docker-compose.yml. ' +
+                        'Otherwise ensure your firewall/VPS allows outbound UDP.\n' +
+                        generateDependencyReport()
+                );
+            }
             if (
                 discordConnection &&
                 !this.activeBridges.has(voiceLink.id)

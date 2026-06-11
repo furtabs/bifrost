@@ -3,6 +3,8 @@ services:
     image: kartoffelchipss/bifrost:latest
     container_name: bifrost
     restart: unless-stopped
+    # Discord voice needs outbound UDP; bridge networking often blocks the handshake.
+    network_mode: host
     env_file:
       - .env
     volumes:
