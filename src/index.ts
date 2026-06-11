@@ -1,8 +1,10 @@
 import { CachedChannelLinkRepository } from './db/cachedrepos/CachedChannelLinkRepository';
+import { CachedVoiceLinkRepository } from './db/cachedrepos/CachedVoiceLinkRepository';
 import { CachedGuildLinkRepository } from './db/cachedrepos/CachedGuildLinkRepository';
 import { CachedMessageLinkRepository } from './db/cachedrepos/CachedMessageLinkRepository';
 import { initDatabase } from './db/sequelize';
 import { SequelizeChannelLinkRepository } from './db/sequelizerepos/SequelizeChannelLinkRepository';
+import { SequelizeVoiceLinkRepository } from './db/sequelizerepos/SequelizeVoiceLinkRepository';
 import { SequelizeGuildLinkRepository } from './db/sequelizerepos/SequelizeGuildLinkRepository';
 import { SequelizeMessageLinkRepository } from './db/sequelizerepos/SequelizeMessageLinkRepository';
 import startDiscordClient from './discord';
@@ -15,6 +17,7 @@ import HealthCheckService from './services/HealthCheckService';
 import MetricsService from './services/MetricsService';
 import MessageQueueService from './services/MessageQueueService';
 import { LinkService } from './services/LinkService';
+import VoiceBridgeService from './services/voiceBridge/VoiceBridgeService';
 import { WebhookService } from './services/WebhookService';
 import {
     DISCORD_APP_ID,
@@ -55,11 +58,16 @@ const main = async () => {
 
     const guildLinkRepo = new SequelizeGuildLinkRepository();
     const channelLinkRepo = new SequelizeChannelLinkRepository();
+    const voiceLinkRepo = new SequelizeVoiceLinkRepository();
     const messageLinkRepo = new SequelizeMessageLinkRepository();
 
     const cachedGuildLinkRepo = new CachedGuildLinkRepository(guildLinkRepo, 0);
     const cachedChannelLinkRepo = new CachedChannelLinkRepository(
         channelLinkRepo,
+        0
+    );
+    const cachedVoiceLinkRepo = new CachedVoiceLinkRepository(
+        voiceLinkRepo,
         0
     );
     const cachedMessageLinkRepo = new CachedMessageLinkRepository(
@@ -70,8 +78,10 @@ const main = async () => {
     const linkService = new LinkService(
         cachedGuildLinkRepo,
         cachedChannelLinkRepo,
+        cachedVoiceLinkRepo,
         cachedMessageLinkRepo
     );
+    const voiceBridgeService = new VoiceBridgeService(linkService);
     const webhookService = new WebhookService();
     const discordEntityResolver = new DiscordEntityResolver();
     const fluxerEntityResolver = new FluxerEntityResolver();
@@ -88,6 +98,7 @@ const main = async () => {
 
     const fluxerArgs = {
         linkService,
+        voiceBridgeService,
         webhookService,
         healthCheckService,
         discordEntityResolver,
@@ -171,7 +182,7 @@ const main = async () => {
         );
     });
 
-    const perms = '536947712';
+    const perms = '540093440';
     const discordBotInviteLink = generateDiscordBotInviteLink(
         DISCORD_APP_ID,
         perms
@@ -186,6 +197,7 @@ const main = async () => {
     const [, initialFluxerClient] = await Promise.all([
         startDiscordClient({
             linkService,
+            voiceBridgeService,
             webhookService,
             healthCheckService,
             discordEntityResolver,

@@ -32,9 +32,12 @@ import StatsFluxerCommandHandler from './commands/fluxer/handlers/StatsFluxerCom
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import { DbStatsService } from './services/DbStatsService';
+import VoicelinkFluxerCommandHandler from './commands/fluxer/handlers/VoicelinkFluxerCommandHandler';
+import VoiceBridgeService from './services/voiceBridge/VoiceBridgeService';
 
 const startFluxerClient = async ({
     linkService,
+    voiceBridgeService,
     webhookService,
     healthCheckService,
     discordEntityResolver,
@@ -46,6 +49,7 @@ const startFluxerClient = async ({
     dbStatsService,
 }: {
     linkService: LinkService;
+    voiceBridgeService: VoiceBridgeService;
     webhookService: WebhookService;
     healthCheckService: HealthCheckService;
     discordEntityResolver: DiscordEntityResolver;
@@ -68,6 +72,7 @@ const startFluxerClient = async ({
     });
 
     webhookService.setFluxerClient(client);
+    voiceBridgeService.setFluxerClient(client);
     healthCheckService.setFluxerClient(client);
     fluxerEntityResolver.setFluxerClient(client);
     fluxerStatsService.setClient(client);
@@ -107,7 +112,12 @@ const startFluxerClient = async ({
     );
     commandRegistry.registerCommand(
         'unlink',
-        new UnlinkFluxerCommandHandler(client, linkService, webhookService)
+        new UnlinkFluxerCommandHandler(
+            client,
+            linkService,
+            webhookService,
+            voiceBridgeService
+        )
     );
     commandRegistry.registerCommand(
         'list',
@@ -122,10 +132,27 @@ const startFluxerClient = async ({
             discordEntityResolver
         )
     );
+    commandRegistry.registerCommand(
+        'voicelink',
+        new VoicelinkFluxerCommandHandler(
+            client,
+            linkService,
+            discordEntityResolver,
+            voiceBridgeService
+        )
+    );
 
     client.once(Events.Ready, () => {
         logger.info('Fluxer bot is ready!');
         healthCheckService.pushFluxerHealthStatus();
+    });
+
+    client.on(Events.VoiceStateUpdate, async (data) => {
+        if (!data.guild_id || !data.user_id) return;
+        await voiceBridgeService.onFluxerVoiceStateUpdate(
+            data.guild_id,
+            data.user_id
+        );
     });
 
     client.on(Events.Error, (error) => {

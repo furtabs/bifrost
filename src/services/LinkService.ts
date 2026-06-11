@@ -1,11 +1,13 @@
 import { MessageLinkRepository } from '../db/repositories/MessageLinkRepository';
 import { ChannelLinkRepository } from '../db/repositories/ChannelLinkRepository';
+import { VoiceLinkRepository } from '../db/repositories/VoiceLinkRepository';
 import { GuildLinkRepository } from '../db/repositories/GuildLinkRepository';
 
 export class LinkService {
     constructor(
         private guildRepo: GuildLinkRepository,
         private channelRepo: ChannelLinkRepository,
+        private voiceRepo: VoiceLinkRepository,
         private messageRepo: MessageLinkRepository
     ) {}
 
@@ -50,6 +52,7 @@ export class LinkService {
 
         await this.messageRepo.deleteByGuildLinkId(existingLink.id);
         await this.channelRepo.deleteByGuildLinkId(existingLink.id);
+        await this.voiceRepo.deleteByGuildLinkId(existingLink.id);
         await this.guildRepo.deleteById(existingLink.id);
     }
 
@@ -62,6 +65,7 @@ export class LinkService {
 
         await this.messageRepo.deleteByGuildLinkId(existingLink.id);
         await this.channelRepo.deleteByGuildLinkId(existingLink.id);
+        await this.voiceRepo.deleteByGuildLinkId(existingLink.id);
         await this.guildRepo.deleteById(existingLink.id);
     }
 
@@ -211,5 +215,110 @@ export class LinkService {
 
     async deleteMessageLink(id: string) {
         return this.messageRepo.deleteMessageLink(id);
+    }
+
+    async createVoiceLink({
+        guildLinkId,
+        discordChannelId,
+        fluxerChannelId,
+    }: {
+        guildLinkId: string;
+        discordChannelId: string;
+        fluxerChannelId: string;
+    }) {
+        const existingDiscordVoiceLink =
+            await this.voiceRepo.findByDiscordChannelId(discordChannelId);
+        if (existingDiscordVoiceLink) {
+            throw new Error('Discord voice channel already linked');
+        }
+
+        const existingFluxerVoiceLink =
+            await this.voiceRepo.findByFluxerChannelId(fluxerChannelId);
+        if (existingFluxerVoiceLink) {
+            throw new Error('Fluxer voice channel already linked');
+        }
+
+        return this.voiceRepo.create({
+            guildLinkId,
+            discordChannelId,
+            fluxerChannelId,
+        });
+    }
+
+    async removeVoiceLinkForDiscord(
+        discordGuildId: string,
+        channelId: string
+    ) {
+        const guildLink =
+            await this.guildRepo.findByDiscordGuildId(discordGuildId);
+        if (!guildLink) {
+            throw new Error('Guild not linked');
+        }
+
+        const voiceLink =
+            await this.voiceRepo.findByDiscordChannelId(channelId);
+
+        if (!voiceLink) {
+            throw new Error('Voice link not found');
+        }
+
+        await this.voiceRepo.deleteById(voiceLink.id);
+
+        return voiceLink;
+    }
+
+    async removeVoiceLinkForFluxer(fluxerGuildId: string, channelId: string) {
+        const guildLink =
+            await this.guildRepo.findByFluxerGuildId(fluxerGuildId);
+        if (!guildLink) {
+            throw new Error('Guild not linked');
+        }
+
+        const voiceLink =
+            await this.voiceRepo.findByFluxerChannelId(channelId);
+
+        if (!voiceLink) {
+            throw new Error('Voice link not found');
+        }
+
+        await this.voiceRepo.deleteById(voiceLink.id);
+
+        return voiceLink;
+    }
+
+    async getVoiceLinksForDiscordGuild(discordGuildId: string) {
+        const guildLink =
+            await this.guildRepo.findByDiscordGuildId(discordGuildId);
+        if (!guildLink) {
+            throw new Error('Guild not linked');
+        }
+
+        return this.voiceRepo.findAllByGuild(guildLink.id);
+    }
+
+    async getVoiceLinksForFluxerGuild(fluxerGuildId: string) {
+        const guildLink =
+            await this.guildRepo.findByFluxerGuildId(fluxerGuildId);
+        if (!guildLink) {
+            throw new Error('Guild not linked');
+        }
+
+        return this.voiceRepo.findAllByGuild(guildLink.id);
+    }
+
+    async getVoiceLinkById(id: string) {
+        return this.voiceRepo.findById(id);
+    }
+
+    async getVoiceLinkByDiscordChannelId(discordChannelId: string) {
+        return this.voiceRepo.findByDiscordChannelId(discordChannelId);
+    }
+
+    async getVoiceLinkByFluxerChannelId(fluxerChannelId: string) {
+        return this.voiceRepo.findByFluxerChannelId(fluxerChannelId);
+    }
+
+    async getAllVoiceLinks() {
+        return this.voiceRepo.findAll();
     }
 }

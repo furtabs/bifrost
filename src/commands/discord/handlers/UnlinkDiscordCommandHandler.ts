@@ -1,6 +1,7 @@
 import { Client, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { LinkService } from '../../../services/LinkService';
 import { WebhookService } from '../../../services/WebhookService';
+import VoiceBridgeService from '../../../services/voiceBridge/VoiceBridgeService';
 import DiscordCommandHandler, {
     DiscordCommandHandlerMessage,
 } from '../DiscordCommandHandler';
@@ -19,6 +20,12 @@ type PendingUnlink =
           discordWebhookToken: string;
           fluxerWebhookId: string;
           fluxerWebhookToken: string;
+      }
+    | {
+          type: 'voice';
+          linkId: string;
+          fluxerChannelId: string;
+          discordChannelId: string;
       };
 
 export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
@@ -30,7 +37,8 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
     constructor(
         client: Client,
         private readonly linkService: LinkService,
-        private readonly webhookService: WebhookService
+        private readonly webhookService: WebhookService,
+        private readonly voiceBridgeService: VoiceBridgeService
     ) {
         super(client);
     }
@@ -116,6 +124,12 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                                 )
                             );
                     }
+                    const voiceLinks = await this.linkService
+                        .getVoiceLinksForDiscordGuild(message.guildId!)
+                        .catch(() => []);
+                    for (const link of voiceLinks) {
+                        await this.voiceBridgeService.onVoiceLinkRemoved(link);
+                    }
                     await this.linkService.removeGuildLinkFromDiscord(
                         message.guildId!
                     );
@@ -144,7 +158,7 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     });
                     logger.error('Unlink guild failed:', err);
                 }
-            } else {
+            } else if (pending.type === 'channel') {
                 if (
                     !(await this.requirePermission(
                         message,
@@ -202,6 +216,48 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                         ],
                     });
                     logger.error('Unlink channel failed:', err);
+                }
+            } else if (pending.type === 'voice') {
+                if (
+                    !(await this.requirePermission(
+                        message,
+                        PermissionFlagsBits.Connect |
+                            PermissionFlagsBits.Speak,
+                        'Connect & Speak'
+                    ))
+                )
+                    return;
+                try {
+                    const removed =
+                        await this.linkService.removeVoiceLinkForDiscord(
+                            message.guildId!,
+                            pending.discordChannelId
+                        );
+                    await this.voiceBridgeService.onVoiceLinkRemoved(removed);
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Voice channel bridge removed.`
+                                )
+                                .setColor(EmbedColors.Success)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to unlink voice channel: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Unlink voice channel failed:', err);
                 }
             }
             return;
@@ -288,6 +344,40 @@ export default class UnlinkDiscordCommandHandler extends DiscordCommandHandler {
                     new EmbedBuilder()
                         .setDescription(
                             `This will remove the channel bridge for Fluxer channel \`${id}\` ↔ <#${channelLink.discordChannelId}>.\n` +
+                                `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
+                        )
+                        .setColor(EmbedColors.Warning)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        const voiceLink = await this.linkService
+            .getVoiceLinkByFluxerChannelId(id)
+            .catch(() => null);
+        if (voiceLink) {
+            if (
+                !(await this.requirePermission(
+                    message,
+                    PermissionFlagsBits.Connect |
+                        PermissionFlagsBits.Speak,
+                    'Connect & Speak'
+                ))
+            )
+                return;
+            this.setPending(message.author.id, {
+                type: 'voice',
+                linkId: voiceLink.linkId,
+                fluxerChannelId: id,
+                discordChannelId: voiceLink.discordChannelId,
+            });
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `This will remove the voice bridge for Fluxer channel \`${id}\` ↔ <#${voiceLink.discordChannelId}>.\n` +
                                 `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
                         )
                         .setColor(EmbedColors.Warning)

@@ -6,6 +6,7 @@ import {
 } from '@fluxerjs/core';
 import { LinkService } from '../../../services/LinkService';
 import { WebhookService } from '../../../services/WebhookService';
+import VoiceBridgeService from '../../../services/voiceBridge/VoiceBridgeService';
 import FluxerCommandHandler from '../FluxerCommandHandler';
 import { COMMAND_PREFIX } from '../../../utils/env';
 import logger from '../../../utils/logging/logger';
@@ -22,6 +23,12 @@ type PendingUnlink =
           discordWebhookToken: string;
           fluxerWebhookId: string;
           fluxerWebhookToken: string;
+      }
+    | {
+          type: 'voice';
+          linkId: string;
+          discordChannelId: string;
+          fluxerChannelId: string;
       };
 
 export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
@@ -33,7 +40,8 @@ export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
     constructor(
         client: Client,
         private readonly linkService: LinkService,
-        private readonly webhookService: WebhookService
+        private readonly webhookService: WebhookService,
+        private readonly voiceBridgeService: VoiceBridgeService
     ) {
         super(client);
     }
@@ -119,6 +127,12 @@ export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
                                 )
                             );
                     }
+                    const voiceLinks = await this.linkService
+                        .getVoiceLinksForFluxerGuild(message.guildId!)
+                        .catch(() => []);
+                    for (const link of voiceLinks) {
+                        await this.voiceBridgeService.onVoiceLinkRemoved(link);
+                    }
                     await this.linkService.removeGuildLinkFromFluxer(
                         message.guildId!
                     );
@@ -147,7 +161,7 @@ export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
                     });
                     logger.error('Unlink guild failed:', err);
                 }
-            } else {
+            } else if (pending.type === 'channel') {
                 if (
                     !(await this.requirePermission(
                         message,
@@ -205,6 +219,48 @@ export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
                         ],
                     });
                     logger.error('Unlink channel failed:', err);
+                }
+            } else if (pending.type === 'voice') {
+                if (
+                    !(await this.requirePermission(
+                        message,
+                        PermissionsBitField.Flags.Connect |
+                            PermissionsBitField.Flags.Speak,
+                        'Connect & Speak'
+                    ))
+                )
+                    return;
+                try {
+                    const removed =
+                        await this.linkService.removeVoiceLinkForFluxer(
+                            message.guildId!,
+                            pending.fluxerChannelId
+                        );
+                    await this.voiceBridgeService.onVoiceLinkRemoved(removed);
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Voice channel bridge removed.`
+                                )
+                                .setColor(EmbedColors.Success)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                } catch (err: unknown) {
+                    await message.reply({
+                        embeds: [
+                            new EmbedBuilder()
+                                .setDescription(
+                                    `Failed to unlink voice channel: ${(err as Error).message}`
+                                )
+                                .setColor(EmbedColors.Error)
+                                .setFooter(footer)
+                                .setTimestamp(),
+                        ],
+                    });
+                    logger.error('Unlink voice channel failed:', err);
                 }
             }
             return;
@@ -291,6 +347,40 @@ export default class UnlinkFluxerCommandHandler extends FluxerCommandHandler {
                     new EmbedBuilder()
                         .setDescription(
                             `This will remove the channel bridge for Discord channel \`${id}\` ↔ <#${channelLink.fluxerChannelId}>.\n` +
+                                `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
+                        )
+                        .setColor(EmbedColors.Warning)
+                        .setFooter(footer)
+                        .setTimestamp(),
+                ],
+            });
+            return;
+        }
+
+        const voiceLink = await this.linkService
+            .getVoiceLinkByDiscordChannelId(id)
+            .catch(() => null);
+        if (voiceLink) {
+            if (
+                !(await this.requirePermission(
+                    message,
+                    PermissionsBitField.Flags.Connect |
+                        PermissionsBitField.Flags.Speak,
+                    'Connect & Speak'
+                ))
+            )
+                return;
+            this.setPending(message.author.id, {
+                type: 'voice',
+                linkId: voiceLink.linkId,
+                discordChannelId: id,
+                fluxerChannelId: voiceLink.fluxerChannelId,
+            });
+            await message.reply({
+                embeds: [
+                    new EmbedBuilder()
+                        .setDescription(
+                            `This will remove the voice bridge for Discord channel \`${id}\` ↔ this voice channel.\n` +
                                 `Run \`${COMMAND_PREFIX}unlink confirm\` to proceed.`
                         )
                         .setColor(EmbedColors.Warning)

@@ -87,6 +87,23 @@ const commandList: Command[] = [
         },
     },
     {
+        name: 'voicelink',
+        discord: {
+            description:
+                'Links a Discord voice channel to a Fluxer voice channel for experimental realtime audio bridging. Run with `confirm` to proceed.',
+            usageArgs: [
+                '<fluxerVoiceChannelId> [discordVoiceChannelId]',
+            ],
+        },
+        fluxer: {
+            description:
+                'Links a Fluxer voice channel to a Discord voice channel for experimental realtime audio bridging. Run with `confirm` to proceed.',
+            usageArgs: [
+                '<discordVoiceChannelId> [fluxerVoiceChannelId]',
+            ],
+        },
+    },
+    {
         name: 'stats',
         discord: {
             description:

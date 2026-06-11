@@ -1,5 +1,6 @@
 import { GuildLinkModel } from './GuildLinkModel';
 import { ChannelLinkModel } from './ChannelLinkModel';
+import { VoiceLinkModel } from './VoiceLinkModel';
 import { MessageLinkModel } from './MessageLinkModel';
 import { QueuedMessageModel } from './QueuedMessageModel';
 
@@ -11,6 +12,18 @@ GuildLinkModel.hasMany(ChannelLinkModel, {
 });
 
 ChannelLinkModel.belongsTo(GuildLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'guildLink',
+});
+
+// Guild -> Voice
+GuildLinkModel.hasMany(VoiceLinkModel, {
+    foreignKey: 'guildLinkId',
+    as: 'voiceLinks',
+    onDelete: 'CASCADE',
+});
+
+VoiceLinkModel.belongsTo(GuildLinkModel, {
     foreignKey: 'guildLinkId',
     as: 'guildLink',
 });
@@ -42,6 +55,7 @@ MessageLinkModel.belongsTo(ChannelLinkModel, {
 export {
     GuildLinkModel,
     ChannelLinkModel,
+    VoiceLinkModel,
     MessageLinkModel,
     QueuedMessageModel,
 };

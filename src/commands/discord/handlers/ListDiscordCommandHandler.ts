@@ -42,6 +42,30 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
         );
     }
 
+    private async buildVoiceLines(
+        voiceLinks: {
+            fluxerChannelId: string;
+            discordChannelId: string;
+            linkId: string;
+        }[],
+        fluxerGuildId: string,
+        showLinkId = false
+    ): Promise<string[]> {
+        return Promise.all(
+            voiceLinks.map(async (link) => {
+                const fluxerChannel = await this.fluxerEntityResolver
+                    .fetchChannel(fluxerGuildId, link.fluxerChannelId)
+                    .catch(() => null);
+                const fluxerName =
+                    (fluxerChannel as { name?: string } | null)?.name ??
+                    link.fluxerChannelId;
+                const fluxerUrl = `https://fluxer.app/channels/${fluxerGuildId}/${link.fluxerChannelId}`;
+                const suffix = showLinkId ? ` | \`${link.linkId}\`` : '';
+                return `🔊 <#${link.discordChannelId}> ←→ [#${fluxerName}](${fluxerUrl})${suffix}\n  └ \`${link.discordChannelId}\` · \`${link.fluxerChannelId}\``;
+            })
+        );
+    }
+
     public async handleCommand(
         message: DiscordCommandHandlerMessage,
         _command: string,
@@ -347,13 +371,17 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 await this.linkService.getChannelLinksForDiscordGuild(
                     message.guildId!
                 );
+            const voiceLinks =
+                await this.linkService.getVoiceLinksForDiscordGuild(
+                    message.guildId!
+                );
 
-            if (channelLinks.length === 0) {
+            if (channelLinks.length === 0 && voiceLinks.length === 0) {
                 await message.reply({
                     embeds: [
                         new EmbedBuilder()
                             .setDescription(
-                                'No channel links found for this server.'
+                                'No channel or voice links found for this server.'
                             )
                             .setColor(EmbedColors.Warning)
                             .setFooter(footer)
@@ -363,19 +391,48 @@ export default class ListDiscordCommandHandler extends DiscordCommandHandler {
                 return;
             }
 
-            const lines = await this.buildChannelLines(
-                channelLinks,
-                guildLink.fluxerGuildId
-            );
-            const chunks = chunkDescriptionLines(lines);
-            const embeds = chunks.map((chunk, i) =>
-                new EmbedBuilder()
-                    .setTitle(
-                        i === 0 ? 'Discord ↔ Fluxer | Linked Channels' : null
+            const embeds: EmbedBuilder[] = [];
+
+            if (channelLinks.length > 0) {
+                const lines = await this.buildChannelLines(
+                    channelLinks,
+                    guildLink.fluxerGuildId
+                );
+                const chunks = chunkDescriptionLines(lines);
+                embeds.push(
+                    ...chunks.map((chunk, i) =>
+                        new EmbedBuilder()
+                            .setTitle(
+                                i === 0
+                                    ? 'Discord ↔ Fluxer | Text Channels'
+                                    : null
+                            )
+                            .setDescription(chunk.join('\n\n'))
+                            .setColor(EmbedColors.Info)
                     )
-                    .setDescription(chunk.join('\n\n'))
-                    .setColor(EmbedColors.Info)
-            );
+                );
+            }
+
+            if (voiceLinks.length > 0) {
+                const voiceLines = await this.buildVoiceLines(
+                    voiceLinks,
+                    guildLink.fluxerGuildId
+                );
+                const chunks = chunkDescriptionLines(voiceLines);
+                embeds.push(
+                    ...chunks.map((chunk, i) =>
+                        new EmbedBuilder()
+                            .setTitle(
+                                i === 0
+                                    ? 'Discord ↔ Fluxer | Voice Channels'
+                                    : null
+                            )
+                            .setDescription(chunk.join('\n\n'))
+                            .setColor(EmbedColors.Info)
+                    )
+                );
+            }
+
             embeds[embeds.length - 1].setFooter(footer).setTimestamp();
 
             await message.reply({ embeds });

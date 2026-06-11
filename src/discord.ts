@@ -32,10 +32,13 @@ import MessageQueueService from './services/MessageQueueService';
 import FluxerStatsService from './services/statsService/FluxerStatsService';
 import DiscordStatsService from './services/statsService/DiscordStatsService';
 import StatsDiscordCommandHandler from './commands/discord/handlers/StatsDiscordCommandHandler';
+import VoicelinkDiscordCommandHandler from './commands/discord/handlers/VoicelinkDiscordCommandHandler';
 import { DbStatsService } from './services/DbStatsService';
+import VoiceBridgeService from './services/voiceBridge/VoiceBridgeService';
 
 const startDiscordClient = async ({
     linkService,
+    voiceBridgeService,
     webhookService,
     healthCheckService,
     discordEntityResolver,
@@ -47,6 +50,7 @@ const startDiscordClient = async ({
     dbStatsService,
 }: {
     linkService: LinkService;
+    voiceBridgeService: VoiceBridgeService;
     webhookService: WebhookService;
     healthCheckService: HealthCheckService;
     discordEntityResolver: DiscordEntityResolver;
@@ -62,6 +66,7 @@ const startDiscordClient = async ({
             GatewayIntentBits.Guilds,
             GatewayIntentBits.GuildMessages,
             GatewayIntentBits.MessageContent,
+            GatewayIntentBits.GuildVoiceStates,
         ],
         partials: [Partials.Message, Partials.Channel],
         presence: {
@@ -76,6 +81,7 @@ const startDiscordClient = async ({
     });
 
     webhookService.setDiscordClient(client);
+    voiceBridgeService.setDiscordClient(client);
     healthCheckService.setDiscordClient(client);
     discordEntityResolver.setDiscordClient(client);
     discordStatsService.setClient(client);
@@ -115,7 +121,12 @@ const startDiscordClient = async ({
     );
     commandRegistry.registerCommand(
         'unlink',
-        new UnlinkDiscordCommandHandler(client, linkService, webhookService)
+        new UnlinkDiscordCommandHandler(
+            client,
+            linkService,
+            webhookService,
+            voiceBridgeService
+        )
     );
     commandRegistry.registerCommand(
         'list',
@@ -128,6 +139,15 @@ const startDiscordClient = async ({
             linkService,
             webhookService,
             fluxerEntityResolver
+        )
+    );
+    commandRegistry.registerCommand(
+        'voicelink',
+        new VoicelinkDiscordCommandHandler(
+            client,
+            linkService,
+            fluxerEntityResolver,
+            voiceBridgeService
         )
     );
 
@@ -147,6 +167,15 @@ const startDiscordClient = async ({
         setInterval(async () => {
             await healthCheckService.pushDiscordHealthStatus();
         }, 30_000);
+    });
+
+    client.on(Events.VoiceStateUpdate, async (_oldState, newState) => {
+        const guildId = newState.guild?.id;
+        if (!guildId || !newState.id) return;
+        await voiceBridgeService.onDiscordVoiceStateUpdate(
+            guildId,
+            newState.id
+        );
     });
 
     client.on(Events.Error, (error) => {
