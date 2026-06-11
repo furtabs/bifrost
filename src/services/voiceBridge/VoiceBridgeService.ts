@@ -47,6 +47,8 @@ export default class VoiceBridgeService {
     private readonly activeBridges = new Map<string, ActiveBridge>();
     /** Prevents overlapping ensureBridge runs for the same link (voice state spam). */
     private readonly startingBridges = new Set<string>();
+    /** Discord allows one voice connection per guild — serialize bridge startup. */
+    private readonly startingGuilds = new Set<string>();
 
     constructor(linkService: LinkService) {
         this.linkService = linkService;
@@ -140,9 +142,13 @@ export default class VoiceBridgeService {
                 .fetch(guildLink.discordGuildId)
                 .catch(() => null);
             if (!guild) return false;
-            const channel = guild.channels.cache.get(
-                voiceLink.discordChannelId
-            );
+            let channel =
+                guild.channels.cache.get(voiceLink.discordChannelId) ?? null;
+            if (!channel) {
+                channel = await guild.channels
+                    .fetch(voiceLink.discordChannelId)
+                    .catch(() => null);
+            }
             if (!channel || !('members' in channel)) return false;
             const members = (
                 channel as VoiceBasedChannel
@@ -175,6 +181,8 @@ export default class VoiceBridgeService {
         );
         if (!guildLink) return;
 
+        if (this.startingGuilds.has(guildLink.discordGuildId)) return;
+
         const hasDiscord = await this.hasHumanParticipants(
             voiceLink,
             'discord'
@@ -183,7 +191,11 @@ export default class VoiceBridgeService {
         if (!hasDiscord && !hasFluxer) return;
 
         this.startingBridges.add(voiceLink.id);
+        this.startingGuilds.add(guildLink.discordGuildId);
         let discordConnection: VoiceConnection | null = null;
+        let logStateChange:
+            | ((oldState: { status: string }, newState: { status: string }) => void)
+            | null = null;
 
         try {
             const discordGuild = await this.discordClient.guilds.fetch(
@@ -206,7 +218,12 @@ export default class VoiceBridgeService {
                 discordConnection.joinConfig.channelId !==
                     voiceLink.discordChannelId
             ) {
-                discordConnection?.destroy();
+                if (discordConnection) {
+                    logger.info(
+                        `Voice bridge: moving Discord connection to channel ${voiceLink.discordChannelId}`
+                    );
+                    discordConnection.destroy();
+                }
                 discordConnection = joinVoiceChannel({
                     channelId: voiceLink.discordChannelId,
                     guildId: guildLink.discordGuildId,
@@ -216,11 +233,29 @@ export default class VoiceBridgeService {
                 });
             }
 
+            logStateChange = (oldState, newState) => {
+                logger.info(
+                    `Voice bridge Discord connection (${voiceLink.discordChannelId}): ${oldState.status} → ${newState.status}`
+                );
+            };
+            discordConnection.on('stateChange', logStateChange);
+
             await entersState(
                 discordConnection,
                 VoiceConnectionStatus.Ready,
                 30_000
             );
+
+            if (
+                !(await this.hasHumanParticipants(voiceLink, 'discord')) &&
+                !(await this.hasHumanParticipants(voiceLink, 'fluxer'))
+            ) {
+                logger.info(
+                    `Voice bridge: no participants left before bridge finished starting`
+                );
+                discordConnection.destroy();
+                return;
+            }
 
             const fluxerGuild = await this.fluxerClient.guilds.fetch(
                 guildLink.fluxerGuildId
@@ -305,19 +340,23 @@ export default class VoiceBridgeService {
                 `Voice bridge active: Discord ${voiceLink.discordChannelId} ↔ Fluxer ${voiceLink.fluxerChannelId}`
             );
         } catch (err) {
+            const status = discordConnection?.state.status ?? 'unknown';
+            logger.error(
+                `Failed to start voice bridge (Discord ${voiceLink.discordChannelId} ↔ Fluxer ${voiceLink.fluxerChannelId}, connection status: ${status}):`,
+                err
+            );
             if (
                 discordConnection &&
                 !this.activeBridges.has(voiceLink.id)
             ) {
                 discordConnection.destroy();
             }
-            const status = discordConnection?.state.status ?? 'unknown';
-            logger.error(
-                `Failed to start voice bridge (Discord ${voiceLink.discordChannelId} ↔ Fluxer ${voiceLink.fluxerChannelId}, connection status: ${status}):`,
-                err
-            );
         } finally {
+            if (discordConnection && logStateChange) {
+                discordConnection.off('stateChange', logStateChange);
+            }
             this.startingBridges.delete(voiceLink.id);
+            this.startingGuilds.delete(guildLink.discordGuildId);
         }
     }
 
